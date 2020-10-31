@@ -18,18 +18,20 @@ namespace signals {
 
         struct iteration_token {
         private:
-            typename connections_t::const_iterator current;
-            iteration_token *next = nullptr;
             signal const *sig = nullptr;
+            iteration_token *next = nullptr;
+            typename connections_t::const_iterator current;
             friend struct signal;
         public:
             iteration_token(const iteration_token &) = delete;
 
             iteration_token &operator=(const iteration_token &) = delete;
 
-            explicit iteration_token(signal const *other) : sig(other) {
-                current = sig->connections.begin();
-                next = sig->top_token;// todo какого фига(((
+            explicit iteration_token(signal const *other) : sig(other), current(sig->connections.begin()),
+                                                            next(sig->top_token) {
+                // current = sig->connections.begin();
+                //   next = sig->top_token;// todo какого фига(((
+             //   std::cout << alignof(sig) << alignof(next) << alignof(current);
                 sig->top_token = this;
             }
 
@@ -46,6 +48,28 @@ namespace signals {
             connection() = default;
 
             connection(connection &&other) noexcept: slot(std::move(other.slot)), sig(other.sig) {
+                mover(other);
+            }
+
+            connection &operator=(connection &&other) noexcept {
+                if (this != &other) {
+                    disconnect();
+                    slot = std::move(other.slot);
+                    sig = other.sig;
+                    mover(other);
+                }
+                return *this;
+            };
+
+            connection(signal *sig, slot_t &&slot) : slot(std::move(slot)), sig(sig) {
+                sig->connections.push_front(*this);
+            };
+
+            ~connection() {
+                disconnect();
+            }
+
+            void mover(connection &other) {
                 if (sig != nullptr) {
                     sig->connections.insert(sig->connections.as_iterator(other), *this);
                     other.unlink();
@@ -55,32 +79,6 @@ namespace signals {
                         }
                     }
                 }
-            }
-
-            connection &operator=(connection &&other) noexcept {
-                if (this != &other) {
-                    disconnect();
-                    slot = std::move(other.slot);
-                    sig = other.sig;
-                    if (sig != nullptr) {
-                        sig->connections.insert(sig->connections.as_iterator(other), *this);
-                        other.unlink();
-                        for (iteration_token *tok = sig->top_token; tok; tok = tok->next) {
-                            if (tok->current != sig->connections.end() && &*tok->current == &other) {
-                                tok->current = sig->connections.as_iterator(*this);
-                            }
-                        }
-                    }
-                }
-                return *this;
-            };
-
-            explicit connection(signal *sig, slot_t slot) : slot(std::move(slot)), sig(sig) {
-                sig->connections.push_front(*this);
-            };
-
-            ~connection() {
-                disconnect();
             }
 
             void disconnect() {
@@ -121,8 +119,8 @@ namespace signals {
             }
         };
 
-        connection connect(slot_t slot) noexcept {
-            return connection(this, slot);
+        connection connect(slot_t &&slot) noexcept {
+            return connection(this, std::move(slot));
         };
 
         void operator()(Args... args) const {
